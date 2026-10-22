@@ -1,0 +1,724 @@
+<title>Forex RSI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap">
+<style>
+/* Terminal layout, deliberately single dark theme.
+   Sticky control bar (timeframe = main filter, quick keys, live status) → summary (8 currency tiles + strength-trend heatmap)
+   → board on a 12-col grid: pair monitor (8) + side column (4: matrix over events/headlines). */
+:root {
+  color-scheme: dark;
+  --bg: #000; --panel: #0a0a0a; --head: #1a1a1a; --band: #0f1d33; --line: #262626; --grid: #1c1c1c;
+  --amber: #ffa028; --amber-dim: #b8731d; --white: #ececec; --grey: #9a9a9a;
+  --green: #3ddc6f; --red: #ff4b4b; --cyan: #46c8ff; --yellow: #ffe14a; --magenta: #ff6fd8; --key: #ffd21f; --mid: #161616;
+  --data: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  --label: "IBM Plex Sans Condensed", "Arial Narrow", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { color: var(--white); font: 12px/1.4 var(--data); margin: 0; padding: 6px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 1px solid var(--yellow); outline-offset: 1px; }
+.up { color: var(--green); } .dn { color: var(--red); } .am { color: var(--amber); } .cy { color: var(--cyan); } .gy { color: var(--grey); } .ye { color: var(--yellow); } .mg { color: var(--magenta); }
+[data-tip] { cursor: help; }
+.def { text-decoration: underline dotted var(--amber-dim); text-underline-offset: 3px; }
+.tipsw { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--grey); font: 600 11px var(--label); letter-spacing: .08em; cursor: pointer; user-select: none; }
+.tipsw input { accent-color: var(--key); width: 15px; height: 15px; margin: 0; cursor: pointer; }
+body.notips [data-tip]:not(button):not(.info) { cursor: auto; }
+body.notips .def, body.notips .xl th .sortb { text-decoration: none; }
+
+/* command bar */
+.cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; background: var(--head); border-bottom: 2px solid var(--amber); padding: 6px 10px; }
+.cmd .tk { background: var(--amber); color: #000; font-weight: 600; padding: 1px 8px; }
+.cmd h1 { margin: 0; font: 700 16px var(--label); letter-spacing: .06em; }
+.cmd .go { color: var(--key); font-weight: 600; }
+.cmd .meta { color: var(--grey); font: 12px var(--label); }
+.cmd .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+.cmd .clock { color: var(--amber); }
+.btn { background: #262626; border: 1px solid #3a3a3a; padding: 2px 10px; cursor: pointer; font-weight: 600; color: var(--white); }
+.btn:hover { border-color: var(--amber); }
+
+/* sticky control bar */
+.ctl { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; background: #050505; border-bottom: 1px solid var(--line); padding: 6px 0 4px; display: grid; gap: 5px; }
+.ctlrow { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
+.tf { display: inline-flex; border: 1px solid var(--amber); }
+.tf button { background: none; border: 0; padding: 4px 14px; cursor: pointer; font: 700 12px var(--label); letter-spacing: .08em; color: var(--amber); }
+.tf button + button { border-left: 1px solid var(--amber-dim); }
+.tf button[aria-pressed="true"] { background: var(--amber); color: #000; }
+.tflab { color: var(--amber); font: 700 11px var(--label); letter-spacing: .08em; }
+.tfdesc { color: var(--grey); font: 12px var(--label); }
+.keys { display: flex; gap: 4px; flex-wrap: wrap; }
+.key { background: #1d1d1d; border: 1px solid #333; border-bottom: 2px solid #444; color: var(--white); padding: 3px 9px; cursor: pointer; font: 600 11.5px var(--label); letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+.key b { font-family: var(--data); }
+.key.str b { color: var(--green); } .key.wk b { color: var(--red); }
+.key[aria-pressed="true"] { background: var(--key); color: #000; border-color: var(--key); }
+.key[aria-pressed="true"] b { color: #000; }
+.key.clear { color: var(--grey); }
+.statusline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font: 12px var(--label); color: var(--grey); min-height: 20px; }
+.statusline .count { color: var(--white); font: 600 12px var(--data); padding: 0 4px; }
+.statusline .count.flash { background: var(--key); color: #000; }
+.fchip { border: 1px solid var(--amber-dim); color: var(--amber); padding: 0 6px; cursor: pointer; background: none; font: 11px var(--data); }
+
+/* summary */
+.summary { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 6px; margin: 6px 0; align-items: start; }
+.left { display: grid; gap: 6px; min-width: 0; }
+.tiles { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; align-content: start; }
+.tile { background: var(--panel); border: 1px solid var(--line); padding: 6px 6px 7px; display: grid; gap: 3px; text-align: left; cursor: pointer; min-width: 0; }
+.tile[aria-pressed="true"] { border-color: var(--key); box-shadow: inset 0 0 0 1px var(--key); }
+.tile.dim { opacity: .45; }
+.tile .top { display: flex; justify-content: space-between; align-items: baseline; }
+.tile .c { font: 700 14px var(--label); letter-spacing: .04em; color: var(--white); }
+.tile .rk { color: var(--grey); font-size: 11px; }
+.tile .sc { font: 600 18px var(--data); padding: 1px 4px; color: #fff; }
+.tile .sc small { font-size: 11px; opacity: .8; }
+.tile .tr { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .mtf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.tile .mtf span { font: 600 10.5px var(--data); text-align: center; color: #fff; padding: 1px 0; }
+.tile .mtf span.cur { outline: 1px solid var(--amber); outline-offset: -1px; }
+.panel { background: var(--panel); border: 1px solid var(--line); min-width: 0; display: flex; flex-direction: column; }
+.ph { display: flex; align-items: center; gap: 10px; background: var(--head); padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.ph h2 { margin: 0; font: 700 12.5px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--amber); }
+.ph .sub { color: var(--grey); font: 11px var(--label); margin-left: auto; text-align: right; }
+.pb { overflow: auto; }
+.status { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 3px 8px; border-top: 1px solid var(--line); background: #0d0d0d; color: var(--grey); font-size: 11px; }
+.status b { color: var(--white); font-weight: 500; }
+.hm { display: grid; gap: 1px; padding: 6px 8px; overflow: hidden; }
+.hm .l { color: var(--amber); font: 600 11px var(--label); display: flex; align-items: center; }
+.hm .d { color: var(--grey); font-size: 10.5px; text-align: left; white-space: nowrap; overflow: visible; }
+.hm .c { height: 17px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: #fff; }
+.legend { display: inline-flex; gap: 1px; vertical-align: middle; } .legend i { width: 12px; height: 8px; }
+
+/* board */
+.board { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+.s8 { grid-column: span 8; } .s4 { grid-column: span 4; }
+.side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+table.xl { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.xl th { position: sticky; top: 0; z-index: 1; background: var(--band); color: var(--amber); font: 600 11px var(--label); letter-spacing: .04em; text-transform: uppercase; text-align: right; padding: 0; border: 1px solid #22344f; white-space: nowrap; }
+.xl th .hc { display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 4px 4px 4px 6px; }
+.xl th.l .hc { justify-content: flex-start; }
+.xl th .sortb { background: none; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-decoration: underline dotted var(--amber-dim); text-underline-offset: 3px; }
+.xl th .arr { color: var(--key); width: 9px; display: inline-block; }
+.xl th .afb { background: #172a47; border: 1px solid #2d4a75; color: var(--grey); width: 15px; height: 15px; line-height: 12px; padding: 0; cursor: pointer; font-size: 9px; margin-left: 3px; flex: none; }
+.xl th .afb.on { background: var(--key); color: #000; border-color: var(--key); }
+.xl td { border: 1px solid var(--grid); padding: 3px 6px; text-align: right; white-space: nowrap; height: 22px; }
+.xl td.l { text-align: left; }
+.xl td.rn { color: #5c5c5c; text-align: center; background: #0e0e0e; width: 28px; }
+.xl td.id { color: var(--white); font-weight: 600; }
+.pill { display: inline-block; padding: 0 5px; font: 600 10.5px var(--label); letter-spacing: .06em; }
+.pill.long { color: #000; background: var(--green); } .pill.short { color: #000; background: var(--red); } .pill.flat { color: var(--grey); border: 1px solid #333; }
+.empty td { text-align: left; color: var(--grey); padding: 10px 8px; }
+.skel { display: inline-block; height: 8px; width: 40px; background: #1d1d1d; }
+.info { background: none; border: 1px solid var(--amber-dim); color: var(--amber); width: 16px; height: 16px; line-height: 13px; padding: 0; font: 600 10px var(--label); cursor: help; }
+.info:hover, .info[aria-expanded="true"] { background: var(--amber); color: #000; }
+.mx { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.mx th { color: var(--amber); font: 600 11px var(--label); padding: 3px 1px; }
+.mx th.rh { text-align: left; padding-left: 8px; cursor: pointer; }
+.mx td { border: 1px solid #050505; text-align: center; padding: 0; height: 26px; font-size: 11px; color: #fff; cursor: pointer; }
+.mx td.diag { background: #0d0d0d; cursor: default; color: #333; }
+.mx td.on { outline: 1px solid var(--key); outline-offset: -1px; }
+.ev td.when { color: var(--grey); text-align: left; } .ev td.ccy { font-weight: 600; text-align: left; }
+.ev td.evn { text-align: left; white-space: normal; font: 12px var(--label); color: var(--white); min-width: 120px; }
+.ev tr.future td.when { color: var(--cyan); }
+.hl { list-style: none; margin: 0; padding: 0; }
+.hl li { display: grid; grid-template-columns: 44px minmax(0, 1fr) 18px; gap: 8px; align-items: start; padding: 5px 8px; border-bottom: 1px solid var(--grid); }
+.hl .t { color: var(--grey); } .hl .h { font: 12.5px/1.35 var(--label); color: var(--white); }
+.hl .p { color: var(--amber); font: 600 10.5px var(--label); letter-spacing: .06em; text-transform: uppercase; display: block; }
+.subh { color: var(--amber); font: 700 11px var(--label); letter-spacing: .08em; padding: 5px 8px; background: #121212; border-bottom: 1px solid var(--line); text-transform: uppercase; }
+.msg { color: var(--grey); padding: 10px 8px; font: 12px var(--label); }
+.notice { background: #1f1a0e; border: 1px solid var(--amber-dim); color: var(--amber); padding: 6px 10px; font: 12px var(--label); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.fkeys { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; color: var(--grey); font: 11px var(--label); }
+.fkeys b { color: var(--amber); font-weight: 600; }
+
+/* detail tooltip */
+.tip { position: fixed; z-index: 30; width: min(360px, calc(100vw - 32px)); background: #111; border: 1px solid var(--amber); box-shadow: 0 8px 24px rgba(0,0,0,.6); padding: 8px 10px; font: 12px/1.45 var(--label); color: #d6d6d6; pointer-events: auto; }
+.tip h3 { margin: 0 0 3px; font: 700 12.5px var(--label); color: var(--white); }
+.tip .k { color: var(--amber); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.tip .f { font: 11.5px/1.5 var(--data); color: var(--cyan); background: #0a0a0a; border-left: 2px solid var(--amber-dim); padding: 3px 6px; margin: 5px 0; white-space: pre-wrap; }
+.tip .src { margin-top: 6px; color: var(--grey); font-size: 11px; }
+.tip a { color: var(--cyan); }
+.tip .act { margin-top: 6px; }
+.tip table { border-collapse: collapse; font: 11px var(--data); margin-top: 4px; }
+.tip td { padding: 1px 6px 1px 0; }
+
+/* autofilter */
+.af { position: fixed; z-index: 31; width: 220px; background: #121212; border: 1px solid #3a3a3a; box-shadow: 0 8px 24px rgba(0,0,0,.6); font: 12px var(--label); }
+.af .row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; }
+.af button.sortopt { background: none; border: 0; width: 100%; text-align: left; padding: 6px 10px; cursor: pointer; }
+.af button.sortopt:hover { background: #1f1f1f; }
+.af hr { border: 0; border-top: 1px solid #2a2a2a; margin: 2px 0; }
+.af .list { max-height: 200px; overflow: auto; }
+.af label { display: flex; gap: 8px; align-items: center; padding: 3px 10px; cursor: pointer; font: 11.5px var(--data); }
+.af input[type="checkbox"] { accent-color: var(--key); }
+.af input[type="number"] { width: 90px; background: #000; color: var(--white); border: 1px solid #3a3a3a; font: 12px var(--data); padding: 2px 4px; }
+.af .foot { display: flex; justify-content: flex-end; gap: 6px; padding: 6px 10px; border-top: 1px solid #2a2a2a; }
+
+@media (max-width: 1180px) {
+  .summary { grid-template-columns: minmax(0, 1fr); }
+  .s8, .s4 { grid-column: span 12; }
+}
+@media (max-width: 600px) {
+  body { font-size: 12.5px; }
+  .cmd { padding: 7px 10px; gap: 4px 10px; }
+  .cmd .meta:not(#fresh) { display: none; }
+  .cmd .right { margin-left: 0; width: 100%; justify-content: space-between; }
+  .btn { min-height: 30px; }
+  .tfdesc { display: none; }
+  .tipsw { margin-left: 0; }
+  .tflab { display: none; }
+  .tf { flex: 1; } .tf button { flex: 1; padding: 7px 0; font-size: 13px; }
+  .keys { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; } .keys::-webkit-scrollbar { display: none; }
+  .key { padding: 7px 11px; flex: none; }
+  .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tile .sc { font-size: 16px; }
+  .ph .sub { display: none; }
+  .info { width: 26px; height: 26px; line-height: 23px; font-size: 12px; }
+  .xl th .afb { width: 22px; height: 22px; font-size: 11px; }
+  .af input[type="number"] { font-size: 16px; }
+  .xl td { height: 34px; }
+  #pairTable th:nth-child(1), #pairTable td:nth-child(1), #pairTable th:nth-child(3), #pairTable td:nth-child(3),
+  #pairTable th:nth-child(4), #pairTable td:nth-child(4), #pairTable th:nth-child(5), #pairTable td:nth-child(5),
+  #pairTable th:nth-child(7), #pairTable td:nth-child(7), #pairTable th:nth-child(11), #pairTable td:nth-child(11),
+  #pairTable th:nth-child(12), #pairTable td:nth-child(12), #pairTable th:nth-child(16), #pairTable td:nth-child(16) { display: none; }
+  #pairTable td:nth-child(2) { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+  #pairTable th:nth-child(2) { position: sticky; left: 0; z-index: 2; }
+  .pb[style] { max-height: none !important; }
+  .mx td { height: 30px; font-size: 10.5px; } .mx th { font-size: 10.5px; }
+  .ev th:nth-child(6), .ev td:nth-child(6) { display: none; }
+  .hl li { grid-template-columns: 40px minmax(0, 1fr) 26px; }
+  .fkeys { flex-direction: column; }
+}
+@media (prefers-reduced-motion: no-preference) { .statusline .count { transition: background-color .4s ease, color .4s ease; } }
+</style>
+
+<header class="cmd">
+  <span class="tk">FXRSI</span><h1>FOREX RSI</h1><span class="go">&lt;GO&gt;</span>
+  <span class="meta">Currency strength monitor · EMA 20 · RSI 14 · 28 pairs · OANDA via TradingView</span>
+  <span class="right"><span class="meta" id="fresh">Loading…</span><span class="clock" id="clock"></span><button class="btn" type="button" id="refreshBtn">REFRESH</button></span>
+</header>
+
+<div class="ctl" id="ctl">
+  <div class="ctlrow">
+    <span class="tflab">TIMEFRAME</span>
+    <div class="tf" role="group" aria-label="Timeframe">
+      <button type="button" data-tf="D" aria-pressed="true">DAILY</button><button type="button" data-tf="W" aria-pressed="false">WEEKLY</button><button type="button" data-tf="M" aria-pressed="false">MONTHLY</button>
+    </div>
+    <span class="tfdesc" id="tfdesc"></span>
+    <label class="tipsw" for="tipsToggle"><input type="checkbox" id="tipsToggle" checked> TOOLTIPS</label>
+  </div>
+  <div class="keys" role="toolbar" aria-label="Quick filters">
+    <button type="button" class="key" data-q="sw" data-tip="def:q_sw">Strong vs weak</button>
+    <button type="button" class="key str" data-q="top" data-tip="def:q_top">Strongest <b id="kTop">—</b></button>
+    <button type="button" class="key wk" data-q="bot" data-tip="def:q_bot">Weakest <b id="kBot">—</b></button>
+    <button type="button" class="key" data-q="align" data-tip="def:q_align">D·W·M aligned</button>
+    <button type="button" class="key" data-q="maj">Majors</button>
+    <button type="button" class="key" data-q="crs">Crosses</button>
+    <button type="button" class="key" data-q="fresh" data-tip="def:q_fresh">Fresh cross ≤3</button>
+    <button type="button" class="key" data-q="rsi" data-tip="def:q_rsi">RSI extremes</button>
+    <button type="button" class="key" data-q="news" data-tip="def:q_news">Event risk 48H</button>
+    <button type="button" class="key clear" id="clearAll">Clear</button>
+  </div>
+  <div class="statusline" id="statusline" aria-live="polite"></div>
+</div>
+<div class="notice" id="notice" hidden></div>
+
+<section class="summary" aria-label="Strength summary">
+  <div class="left">
+    <div class="tiles" id="tiles"></div>
+    <div class="panel"><div class="ph"><h2 class="def" data-tip="def:top">Top setups</h2><span class="sub">Biggest Diff where price confirms · click to show only that pair</span></div><div class="pb"><table class="xl" id="topTable"></table></div></div>
+  </div>
+  <div class="panel">
+    <div class="ph"><h2 id="histTitle" class="def" data-tip="def:hist">Strength trend</h2><span class="sub" id="histLegend"></span></div>
+    <div class="hm" id="hist"></div>
+  </div>
+</section>
+
+<main class="board">
+  <section class="panel s8" aria-labelledby="h-pairs" id="pairPanel">
+    <div class="ph"><h2 id="h-pairs">Pair monitor</h2><span class="sub" id="pairHint">Hover a header for its formula · click to sort · ▾ to filter</span></div>
+    <div class="pb" style="max-height: 760px"><table class="xl" id="pairTable"></table></div>
+    <div class="status" id="pairStatus"></div>
+  </section>
+  <div class="side s4">
+    <section class="panel" aria-labelledby="h-mx">
+      <div class="ph"><h2 id="h-mx" class="def" data-tip="def:matrix">Strength matrix</h2><span class="sub" id="mxLegend"></span></div>
+      <div class="pb"><table class="mx" id="matrix"></table></div>
+      <div class="status"><span>Row vs column · % from EMA 20</span><span>Click a cell to filter that pair</span></div>
+    </section>
+    <section class="panel" aria-labelledby="h-news">
+      <div class="ph"><h2 id="h-news">Major events &amp; headlines</h2><span class="sub">High impact only</span></div>
+      <div class="pb" style="max-height: 420px">
+        <div class="subh">Economic calendar · past 7 / next 7 days</div>
+        <div id="events"><div class="msg">Loading high-impact events…</div></div>
+        <div class="subh">Central-bank &amp; macro headlines</div>
+        <div id="headlines"><div class="msg">Loading headlines…</div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="fkeys">
+  <span><b>METHOD</b> ForexRSI_5 workbook, “RSI (2)” tab: close above MA = base strong; score 0–7 = currencies beaten; DIFF = |base − quote|.</span>
+  <span><b>TIMEFRAME</b> switches the closes used for EMA 20, RSI 14 and every score.</span>
+  <span><b>DATA</b> live with your own TradingView connector: daily every 15 min, weekly and monthly every hour. Without one you see the owner's last saved snapshot. Not investment advice.</span>
+</div>
+
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<div class="af" id="af" role="dialog" aria-label="Column filter" hidden></div>
+
+<script>
+(() => {
+  const SERVER = "TradingView", OHLCV = "mcp-tv-get-ohlcv", CAL = "mcp-tv-get-economic-calendar", NEWS = "mcp-tv-get-news";
+  const CCYS = ["AUD","CAD","CHF","EUR","GBP","JPY","NZD","USD"];
+  const NAMES = { AUD: "Australian dollar", CAD: "Canadian dollar", CHF: "Swiss franc", EUR: "Euro", GBP: "British pound", JPY: "Japanese yen", NZD: "New Zealand dollar", USD: "US dollar" };
+  const CTRY = { US: "USD", EU: "EUR", DE: "EUR", FR: "EUR", GB: "GBP", JP: "JPY", AU: "AUD", CA: "CAD", CH: "CHF", NZ: "NZD" };
+  const MAJORS = new Set(["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD"]);
+  const PAIRS = ["AUDCAD","AUDCHF","AUDJPY","AUDNZD","AUDUSD","CADCHF","CADJPY","CHFJPY","EURAUD","EURCAD","EURCHF","EURGBP","EURJPY","EURNZD","EURUSD","GBPAUD","GBPCAD","GBPCHF","GBPJPY","GBPNZD","GBPUSD","NZDCAD","NZDCHF","NZDJPY","NZDUSD","USDCAD","USDCHF","USDJPY"];
+  const TF = {
+    D: { name: "Daily", unit: "d", units: "days", bar: "day", iv: "1D", bars: 300, hist: 30, look: 5, every: 15 * 60e3 },
+    W: { name: "Weekly", unit: "w", units: "weeks", bar: "week", iv: "1W", bars: 200, hist: 26, look: 4, every: 60 * 60e3 },
+    M: { name: "Monthly", unit: "m", units: "months", bar: "month", iv: "M", bars: 150, hist: 24, look: 3, every: 60 * 60e3 }
+  };
+  const LEN = 20, A = 2 / (LEN + 1);
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const series = { D: {}, W: {}, M: {} }, errors = { D: {}, W: {}, M: {} };
+  let events = null, eventsErr = null, headlines = null, newsErr = null, liveEv = false, liveNews = false;
+  const isPhone = () => matchMedia("(max-width: 600px)").matches;
+
+  // ================= math =================
+  function ema(c) { const o = new Array(c.length); let e = c[0]; for (let i = 0; i < c.length; i++) { e = i ? A * c[i] + (1 - A) * e : c[0]; o[i] = e; } return o; }
+  function rsi(c, n = 14) { const o = new Array(c.length).fill(null), ag = o.slice(), al = o.slice(); if (c.length <= n) return { o, ag, al }; let g = 0, l = 0;
+    for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l -= d; } g /= n; l /= n; ag[n] = g; al[n] = l; o[n] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+    for (let i = n + 1; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n; ag[i] = g; al[i] = l; o[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l); } return { o, ag, al }; }
+  function prep(tf, p) { const s = series[tf][p]; if (!s || !s.c || s.c.length < LEN + 15) return null; if (!s.ema) { s.ema = ema(s.c); const r = rsi(s.c); s.rsi = r.o; s.ag = r.ag; s.al = r.al; s.idx = new Map(s.t.map((t, i) => [t, i])); } return s; }
+  function at(tf, p, key) { const s = prep(tf, p); if (!s) return null; const i = key == null ? s.c.length - 1 : s.idx.get(key); return i === undefined ? null : { s, i }; }
+  const pairOf = (X, Y) => PAIRS.includes(X + Y) ? { p: X + Y, sg: 1 } : { p: Y + X, sg: -1 };
+  function dist(tf, X, Y, key) { const { p, sg } = pairOf(X, Y); const a = at(tf, p, key); if (!a) return null; return sg * (a.s.c[a.i] - a.s.ema[a.i]) / a.s.ema[a.i] * 100; }
+  function ccyRsi(tf, X) { let sum = 0, n = 0; for (const Y of CCYS) { if (X === Y) continue; const { p, sg } = pairOf(X, Y); const a = at(tf, p, null); if (a && a.s.rsi[a.i] != null) { sum += sg > 0 ? a.s.rsi[a.i] : 100 - a.s.rsi[a.i]; n++; } } return n ? sum / n : null; }
+  function snap(tf, key) { const r = {}; for (const X of CCYS) { let score = 0, sum = 0, n = 0; const vs = []; for (const Y of CCYS) { if (X === Y) continue; const d = dist(tf, X, Y, key); if (d == null) continue; n++; sum += d; if (d > 0) score++; vs.push({ Y, d }); } r[X] = { score, avg: n ? sum / n : null, n, vs }; } return r; }
+
+  // ================= model per timeframe =================
+  const MS = { D: null, W: null, M: null };
+  function build(tf) {
+    const T = TF[tf]; const ready = PAIRS.filter(p => prep(tf, p)); if (ready.length < 20) return null;
+    const base = prep(tf, "EURUSD") || prep(tf, ready[0]);
+    const keys = base.t.slice(-Math.max(90, T.hist + T.look + 1)); const snaps = keys.map(k => snap(tf, k));
+    const today = snaps[snaps.length - 1], past = snaps[snaps.length - 1 - T.look];
+    const ccy = CCYS.map(X => {
+      const t = today[X], side = t.score >= 4 ? "S" : "W";
+      let run = 0; for (let k = snaps.length - 1; k >= 0 && snaps[k][X].n && ((snaps[k][X].score >= 4 ? "S" : "W") === side); k--) run++;
+      const since = keys[Math.max(0, keys.length - run)];
+      const dl = t.score - past[X].score, best = t.vs.slice().sort((a, b) => Math.abs(b.d) - Math.abs(a.d))[0];
+      return { ccy: X, score: t.score, avg: t.avg, vs: t.vs, rsi: ccyRsi(tf, X), dl, side, run, capped: run === snaps.length, since, best,
+        trend: side === "S" ? (dl < 0 ? "Strong, fading" : "Strong") : (dl > 0 ? "Weak, recovering" : "Weak") };
+    }).sort((a, b) => b.score - a.score || (b.avg ?? -9) - (a.avg ?? -9));
+    ccy.forEach((c, i) => c.rank = i + 1);
+    const by = Object.fromEntries(ccy.map(c => [c.ccy, c]));
+    const rows = PAIRS.map((p, idx) => {
+      const a = at(tf, p, null), b = p.slice(0, 3), q = p.slice(3);
+      if (!a) return { p, b, q, idx, missing: true };
+      const { s, i } = a, c = s.c[i], e = s.ema[i], d = (c - e) / e * 100;
+      const sb = today[b].score, sq = today[q].score, net = sb - sq, sgn = Math.sign(net), net5 = past[b].score - past[q].score;
+      const L = T.look, slope = (s.ema[i] - s.ema[i - L]) / s.ema[i - L] * 100;
+      let cross = 0; const sd = Math.sign(c - e); for (let k = i; k > 0 && Math.sign(s.c[k] - s.ema[k]) === sd; k--) cross++;
+      return { p, b, q, idx, tf, type: MAJORS.has(p) ? "Major" : "Cross", c, e, d, signal: d > 0 ? "Strong" : "Weak", rsi: s.rsi[i], ag: s.ag[i], al: s.al[i], sb, sq, gap: Math.abs(net),
+        side: sgn > 0 ? "LONG" : sgn < 0 ? "SHORT" : "FLAT", sgn, cross, crossAt: s.t[Math.max(0, i - cross + 1)], slope, emaL: s.ema[i - L], mom: sgn ? sgn * (net - net5) : 0, net, net5, aligned: sgn !== 0 && Math.sign(d) === sgn };
+    });
+    return { tf, ccy, by, rows, keys, snaps, today };
+  }
+
+  // ================= events =================
+  const fmtDay = ts => new Date(ts).toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+  const fmtTime = ts => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const shortDate = (t, tf) => { const d = new Date((t + 43200) * 1000); return tf === "M" ? d.toLocaleDateString(undefined, { month: "short", year: "2-digit" }) : d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" }); };
+  const barDate = (t, tf) => { const d = new Date((t + 43200) * 1000); return tf === "M" ? d.toLocaleDateString(undefined, { month: "short", year: "2-digit" }) : d.toLocaleDateString(undefined, { day: "2-digit", month: "short" }); };
+  function evFor(c, back, fwd) { if (!events) return []; const now = Date.now(); return events.filter(e => e.ccy === c && e.ts >= now - back * 3600e3 && e.ts <= now + fwd * 3600e3); }
+  const fmtNum = (v, e) => v == null ? "—" : (+v).toLocaleString(undefined, { maximumFractionDigits: 3 }) + (e.unit === "%" ? "%" : e.scale || "");
+  const surprise = e => (e.actual == null || e.forecast == null) ? "" : e.actual > e.forecast ? "above" : e.actual < e.forecast ? "below" : "in line with";
+
+  // ================= format =================
+  const pct = v => v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
+  const sgnN = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
+  const px = (p, v) => v.toFixed(p.endsWith("JPY") ? 3 : 5);
+  const heat = t => { const k = Math.round(Math.min(1, Math.abs(t)) * 100); return `color-mix(in oklab, ${t >= 0 ? "var(--green)" : "var(--red)"} ${Math.round(k * 0.6)}%, var(--mid))`; };
+  const scoreHeat = s => heat((s - 3.5) / 3.5);
+  const ramp = (lo, hi) => `<span class="gy">${lo}</span> <span class="legend">${[-1, -2/3, -1/3, 0, 1/3, 2/3, 1].map(t => `<i style="background:${heat(t)}"></i>`).join("")}</span> <span class="gy">${hi}</span>`;
+  const rsiCls = v => v == null ? "gy" : v >= 70 ? "mg" : v <= 30 ? "cy" : v >= 55 ? "up" : v <= 45 ? "dn" : "";
+  const scoreColor = s => s >= 5 ? "var(--green)" : s <= 2 ? "var(--red)" : s >= 4 ? "#9bd96b" : "#ff9a6b";
+
+  // ================= state =================
+  const S = { tf: "D", quick: null, ccy: [], pair: null, sort: { key: "gap", dir: -1 }, af: {}, tips: true };
+  try { const x = JSON.parse(localStorage.getItem("fxrsi.v7") || "null"); if (x) Object.assign(S, x); } catch (e) {}
+  const save = () => { try { localStorage.setItem("fxrsi.v7", JSON.stringify(S)); } catch (e) {} };
+  const cur = () => MS[S.tf];
+  const T = () => TF[S.tf];
+  const QUICK = {
+    sw: { label: "Strong vs weak", fn: r => { const m = cur(), top = m.ccy.slice(0, 3).map(c => c.ccy), bot = m.ccy.slice(-3).map(c => c.ccy), st = r.sgn > 0 ? r.b : r.q, wk = r.sgn > 0 ? r.q : r.b; return r.sgn !== 0 && top.includes(st) && bot.includes(wk) && r.aligned; } },
+    top: { label: () => `Strongest ${cur().ccy[0].ccy}`, fn: r => r.b === cur().ccy[0].ccy || r.q === cur().ccy[0].ccy },
+    bot: { label: () => `Weakest ${cur().ccy[7].ccy}`, fn: r => r.b === cur().ccy[7].ccy || r.q === cur().ccy[7].ccy },
+    align: { label: "D·W·M aligned", fn: r => r.sgn !== 0 && ["D", "W", "M"].every(tf => { const m = MS[tf]; if (!m) return false; const x = m.rows[r.idx]; return !x.missing && x.sgn === r.sgn && x.aligned; }) },
+    maj: { label: "Majors", fn: r => r.type === "Major" },
+    crs: { label: "Crosses", fn: r => r.type === "Cross" },
+    fresh: { label: "Fresh cross ≤3", fn: r => r.cross <= 3 && r.aligned },
+    rsi: { label: "RSI extremes", fn: r => r.rsi >= 70 || r.rsi <= 30 },
+    news: { label: "Event risk 48H", fn: r => evFor(r.b, 0, 48).length + evFor(r.q, 0, 48).length > 0 }
+  };
+
+  // ================= definitions (hover on headers) =================
+  const DEF = () => { const t = T(); return {
+    p: ["Pair", "Base/Quote. The base is the first currency; prices are quoted as units of quote per 1 base."],
+    type: ["Type", "Major = one of the 7 USD pairs. Cross = no USD."],
+    b: ["Base currency", "First currency in the pair."], q: ["Quote currency", "Second currency in the pair."],
+    c: ["Last", `Latest ${t.name.toLowerCase()} close. The current ${t.bar} is still forming until it closes.`],
+    e: ["EMA 20", `Exponential moving average of the last 20 ${t.name.toLowerCase()} closes.`, `α = 2 ÷ (20 + 1) = 0.0952\nEMAₜ = α × Closeₜ + (1 − α) × EMAₜ₋₁`],
+    d: ["% from EMA", "How far price sits above (+) or below (−) its EMA 20.", "% EMA = (Close − EMA20) ÷ EMA20 × 100"],
+    signal: ["Signal", "Workbook column E. Price above EMA = base currency Strong against the quote; below = Weak.", "Strong if Close > EMA20"],
+    rsi: ["RSI 14", "Wilder's Relative Strength Index on the same closes. 70+ overbought (magenta), 30 or less oversold (cyan).", "RS = avg gain₁₄ ÷ avg loss₁₄ (Wilder smoothing)\nRSI = 100 − 100 ÷ (1 + RS)"],
+    sb: ["Base score", "How many of the other 7 currencies the base is beating (0–7). See the tiles at the top."],
+    sq: ["Quote score", "How many of the other 7 currencies the quote is beating (0–7)."],
+    gap: ["Diff", "Workbook column U. The bigger the gap, the stronger one side is versus the other.", "Diff = |Base score − Quote score|"],
+    side: ["Side", "Direction the scores point to. Long = buy the base (base is stronger). Short = sell the base. ✕px = price is on the other side of the EMA, so it doesn't confirm yet.", "Long if Base score > Quote score"],
+    cross: [`Bars since cross`, `How many ${t.units} price has stayed on its current side of the EMA 20. Yellow = 3 or fewer.`, "Count back while sign(Close − EMA) is unchanged"],
+    slope: [`EMA slope (${t.look}${t.unit})`, `Change in the EMA 20 over the last ${t.look} ${t.units}. Rising for longs and falling for shorts confirms the trend.`, `Slope = (EMAₜ − EMAₜ₋${t.look}) ÷ EMAₜ₋${t.look} × 100`],
+    mom: [`Δ Diff (${t.look}${t.unit})`, `Is the gap between the two currencies growing in the trade's direction? Cyan = widening, magenta = narrowing.`, `Δ = direction × [(Bₜ − Qₜ) − (Bₜ₋${t.look} − Qₜ₋${t.look})]`],
+    evt: ["Event risk", "Number of high-impact economic releases for either currency in the next 48 hours. Tap the number for details."],
+    hist: [`Strength trend (${t.name.toLowerCase()})`, `Each currency's score for each of the last ${t.hist} ${t.units}. Green = strong (beating most others), red = weak. The last column is still forming.`, "Score = count of the 7 other currencies it beats"],
+    matrix: ["Strength matrix", "Row currency vs column currency: % distance from EMA 20 on that pair (sign flipped when the row currency is the quote). Green = row stronger.", "Cell = ±(Close − EMA20) ÷ EMA20 × 100"],
+    top: ["Top setups", "The 4 pairs with the largest Diff where price is on the confirming side of the EMA 20. Ties are broken by distance from the EMA.", "Rank by Diff, then |% EMA|; keep Side ≠ FLAT and price confirms"],
+    q_sw: ["Strong vs weak", "Pairs where the stronger currency is in today's top 3 and the weaker in the bottom 3, and price confirms (on the right side of the EMA)."],
+    q_top: ["Strongest", "Every pair that contains the #1 ranked currency on this timeframe."],
+    q_bot: ["Weakest", "Every pair that contains the #8 ranked currency on this timeframe."],
+    q_align: ["D·W·M aligned", "Pairs where daily, weekly and monthly all point the same way (same side and price confirms on all three)."],
+    q_fresh: ["Fresh cross", `Price crossed its EMA 20 within the last 3 ${t.units}, in the direction the scores point.`],
+    q_rsi: ["RSI extremes", "RSI 14 at 70 or above, or 30 or below."],
+    q_news: ["Event risk 48H", "Either currency has a high-impact economic release in the next 48 hours."]
+  }; };
+  const defHTML = k => { const d = DEF()[k]; if (!d) return ""; return `<div class="k">Definition · ${T().name}</div><h3>${esc(d[0])}</h3><div>${esc(d[1])}</div>${d[2] ? `<div class="f">${esc(d[2])}</div>` : ""}`; };
+
+  // ================= value-level explanations =================
+  function tileHTML(X) {
+    const m = cur(); const c = m.by[X]; const t = T();
+    const wins = c.vs.filter(v => v.d > 0).sort((a, b) => b.d - a.d), losses = c.vs.filter(v => v.d <= 0).sort((a, b) => a.d - b.d);
+    const mtf = ["D", "W", "M"].map(k => MS[k] ? `${TF[k].name} <b style="color:${scoreColor(MS[k].by[X].score)}">${MS[k].by[X].score}/7</b>` : `${TF[k].name} …`).join(" · ");
+    const evL = evFor(X, 24 * 7, 0).filter(e => e.actual != null).sort((a, b) => b.ts - a.ts)[0], evN = evFor(X, 0, 24 * 7).filter(e => e.actual == null).sort((a, b) => a.ts - b.ts)[0];
+    return `<div class="k">${X} · ${NAMES[X]} · ${t.name} · rank ${c.rank} of 8</div>
+      <h3>${c.side === "S" ? "▲" : "▼"} ${c.trend} for ${c.run}${c.capped ? "+" : ""} ${t.units} <span class="gy">(since ${barDate(c.since, S.tf)})</span></h3>
+      <div>Above its EMA against <b>${c.score} of 7</b> currencies. Score ${c.dl === 0 ? "unchanged" : (c.dl > 0 ? "up " : "down ") + Math.abs(c.dl)} over ${t.look} ${t.units}. Currency RSI <b class="${rsiCls(c.rsi)}">${c.rsi?.toFixed(1) ?? "—"}</b>.</div>
+      <table><tr><td class="up">Beats</td><td>${wins.map(v => `${v.Y} ${pct(v.d)}`).join(", ") || "—"}</td></tr><tr><td class="dn">Loses to</td><td>${losses.map(v => `${v.Y} ${pct(v.d)}`).join(", ") || "—"}</td></tr></table>
+      <div class="f">Score = ${wins.length} wins of ${c.vs.length}\nAvg % EMA = Σ(±% EMA) ÷ ${c.vs.length} = ${pct(c.avg)}\nTrend = consecutive ${t.units} with score ${c.side === "S" ? "≥ 4" : "≤ 3"}</div>
+      <div>All timeframes: ${mtf}</div>
+      ${evL ? `<div class="src">Last event: ${esc(evL.title)} ${fmtNum(evL.actual, evL)} vs ${fmtNum(evL.forecast, evL)} fcst (${surprise(evL) || "no fcst"}), ${fmtDay(evL.ts)}</div>` : ""}
+      ${evN ? `<div class="src">Next event: <span class="cy">${esc(evN.title)}</span> ${fmtDay(evN.ts)} ${fmtTime(evN.ts)}</div>` : ""}
+      <div class="act"><button class="btn" type="button" data-filter-ccy="${X}">${S.ccy.includes(X) ? "Remove " + X + " filter" : "Show only " + X + " pairs"}</button></div>`;
+  }
+  function cellHTML(key) {
+    const [, col, p] = key.split(":"); const r = cur()?.rows.find(x => x.p === p); if (!r || r.missing) return ""; const t = T(), P = `${r.b}/${r.q}`;
+    const H = (title, body, f) => `<div class="k">${P} · ${t.name}</div><h3>${title}</h3>${body ? `<div>${body}</div>` : ""}${f ? `<div class="f">${f}</div>` : ""}`;
+    if (col === "d") return H(`% from EMA ${pct(r.d)}`, `Price is ${r.d > 0 ? "above" : "below"} its EMA 20, so ${r.b} is <b>${r.signal}</b> against ${r.q}.`, `(${px(r.p, r.c)} − ${px(r.p, r.e)}) ÷ ${px(r.p, r.e)} × 100\n= ${pct(r.d)}`);
+    if (col === "rsi") return H(`RSI 14 = ${r.rsi?.toFixed(1)}`, r.rsi >= 70 ? "Overbought zone." : r.rsi <= 30 ? "Oversold zone." : "Neutral zone (30–70).", `avg gain = ${r.ag?.toPrecision(3)}, avg loss = ${r.al?.toPrecision(3)}\nRS = ${(r.ag / r.al).toFixed(2)}\nRSI = 100 − 100 ÷ (1 + ${(r.ag / r.al).toFixed(2)}) = ${r.rsi?.toFixed(1)}`);
+    if (col === "gap") return H(`Diff = ${r.gap}`, `${r.b} beats ${r.sb} of 7, ${r.q} beats ${r.sq} of 7.`, `|${r.sb} − ${r.sq}| = ${r.gap}`);
+    if (col === "side") return H(`${r.side}`, r.sgn === 0 ? "Both currencies have the same score, so there is no edge." : `${r.sgn > 0 ? r.b : r.q} is the stronger currency, so the scores point ${r.side.toLowerCase()} ${r.b}. ${r.aligned ? "Price confirms (on the right side of the EMA)." : "Price does not confirm yet (on the other side of the EMA)."}`, `${r.b} ${r.sb} vs ${r.q} ${r.sq} → ${r.side}`);
+    if (col === "cross") return H(`${r.cross} ${t.units} on this side`, `Price has been ${r.d > 0 ? "above" : "below"} the EMA 20 since ${barDate(r.crossAt, S.tf)}.`, "");
+    if (col === "slope") return H(`EMA slope ${pct(r.slope)}`, `EMA 20 is ${r.slope > 0 ? "rising" : "falling"} over ${t.look} ${t.units}${r.sgn ? (r.slopeOk || (Math.sign(r.slope) === r.sgn) ? ", which confirms the " + r.side.toLowerCase() : ", which goes against the " + r.side.toLowerCase()) : ""}.`, `(${px(r.p, r.e)} − ${px(r.p, r.emaL)}) ÷ ${px(r.p, r.emaL)} × 100 = ${pct(r.slope)}`);
+    if (col === "mom") return H(`Δ Diff ${sgnN(r.mom)}`, r.mom > 0 ? "The gap is widening in the trade's direction." : r.mom < 0 ? "The gap is narrowing." : "No change.", `now (${r.b}−${r.q}) = ${sgnN(r.net)}\n${t.look} ${t.units} ago = ${sgnN(r.net5)}\nΔ = ${r.sgn >= 0 ? "" : "−"}(${sgnN(r.net)} − ${sgnN(r.net5)}) = ${sgnN(r.mom)}`);
+    return "";
+  }
+  function evTipHTML(key) {
+    const cut = key.indexOf(":"), kind = key.slice(0, cut), id = key.slice(cut + 1);
+    if (kind === "ev") { const e = events?.find(x => String(x.id) === id); if (!e) return ""; const sp = surprise(e), note = (e.comment || "").split(/(?<=\.)\s/).slice(0, 2).join(" ").slice(0, 260);
+      let host = ""; try { host = e.source_url ? new URL(e.source_url).hostname.replace(/^www\./, "") : ""; } catch (x) {}
+      return `<div class="k">${e.ccy} · ${esc(e.country)} · high impact</div><h3>${esc(e.title)} ${e.period ? "(" + esc(e.period) + ")" : ""}</h3><div class="f">Act ${fmtNum(e.actual, e)} · Fcst ${fmtNum(e.forecast, e)} · Prev ${fmtNum(e.previous, e)}${sp ? ` · ${sp} forecast` : e.actual == null ? " · scheduled" : ""}</div><div>${esc(note)}${note.length >= 260 ? "…" : ""}</div><div class="src">Source: ${esc(e.source || "—")}${host ? ` · <a href="${esc(e.source_url)}" target="_blank" rel="noopener">${esc(host)}</a>` : ""} · via TradingView calendar · ${fmtDay(e.ts)} ${fmtTime(e.ts)}</div>`; }
+    if (kind === "hl") { const h = headlines?.find(x => String(x.id) === id); if (!h) return "";
+      return `<div class="k">${esc(h.provider)} · ${fmtDay(h.ts)} ${fmtTime(h.ts)}</div><h3>${esc(h.title)}</h3><div>${h.ccys.length ? `Currencies mentioned: <b>${h.ccys.join(", ")}</b>. ` : ""}${h.paywall ? "Full story may need a subscription." : ""}</div><div class="src">Source: ${esc(h.provider)} · <a href="${esc(h.link)}" target="_blank" rel="noopener">Open story on TradingView</a></div>`; }
+    if (kind === "pairev") { const b = id.slice(0, 3), q = id.slice(3); const ev = [...evFor(b, 0, 48), ...evFor(q, 0, 48)].sort((a, c) => a.ts - c.ts);
+      return `<div class="k">${b}/${q} · event risk next 48h</div>${ev.map(e => `<div style="margin-top:4px"><span class="am">${e.ccy}</span> ${esc(e.title)} <span class="cy">${fmtDay(e.ts)} ${fmtTime(e.ts)}</span> · fcst ${fmtNum(e.forecast, e)}</div>`).join("")}<div class="src">Source: TradingView economic calendar</div>`; }
+    if (kind === "mx") { const [X, Y] = id.split("-"); const d = dist(S.tf, X, Y, null); const { p, sg } = pairOf(X, Y); const a = at(S.tf, p, null); if (d == null || !a) return "";
+      return `<div class="k">Matrix · ${T().name}</div><h3>${X} vs ${Y}: ${pct(d)}</h3><div>${X} is <b>${d > 0 ? "stronger" : "weaker"}</b> (via ${p.slice(0, 3)}/${p.slice(3)}${sg < 0 ? ", sign flipped because " + X + " is the quote" : ""}). Click to filter.</div><div class="f">${sg < 0 ? "−" : ""}(${px(p, a.s.c[a.i])} − ${px(p, a.s.ema[a.i])}) ÷ ${px(p, a.s.ema[a.i])} × 100 = ${pct(d)}</div>`; }
+    if (kind === "hc") { const [X, k] = id.split("@"); const m = cur(); const i = m.keys.indexOf(+k); const s = m.snaps[i]?.[X]; if (!s) return "";
+      return `<div class="k">${X} · ${T().name} bar of ${barDate(+k, S.tf)}${i === m.keys.length - 1 ? " (forming)" : ""}</div><h3>Score ${s.score}/7</h3><div>Beats: ${s.vs.filter(v => v.d > 0).map(v => v.Y).join(", ") || "—"}</div><div class="f">Avg % EMA = ${pct(s.avg)}</div>`; }
+    return "";
+  }
+  function tipContent(key) { if (key.startsWith("def:")) return defHTML(key.slice(4)); if (key.startsWith("tile:")) return cur() ? tileHTML(key.slice(5)) : ""; if (key.startsWith("cell:")) return cellHTML(key); return evTipHTML(key); }
+
+  // ================= tooltip engine (hover on desktop, tap on touch) =================
+  const tip = $("tip"); let tipFor = null, tipPinned = false, hideT = 0, autoT = 0;
+  function placeTip(el) { const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px";
+    tip.style.top = (r.bottom + h + 10 < innerHeight ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + "px"; }
+  function showTip(el, pinned) { if (S.tips === false && !el.classList.contains("info")) return; const html = tipContent(el.dataset.tip); if (!html) return; clearTimeout(hideT); clearTimeout(autoT); tip.innerHTML = html; tip.hidden = false; tipFor = el; tipPinned = !!pinned; placeTip(el); }
+  function hideTip() { tip.hidden = true; tipFor = null; tipPinned = false; }
+  document.addEventListener("pointerover", e => { if (e.pointerType !== "mouse") return; const el = e.target.closest?.("[data-tip]"); if (el && !tipPinned) showTip(el, false); });
+  document.addEventListener("pointerout", e => { if (e.pointerType !== "mouse" || tipPinned) return; const el = e.target.closest?.("[data-tip]"); if (el) hideT = setTimeout(() => { if (!tip.matches(":hover")) hideTip(); }, 120); });
+  tip.addEventListener("pointerleave", e => { if (e.pointerType === "mouse" && !tipPinned) hideTip(); });
+  document.addEventListener("focusin", e => { const el = e.target.closest?.("[data-tip]"); if (el && !tipPinned && e.target.matches(":focus-visible")) showTip(el, false); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { hideTip(); closeAF(); } });
+  let lastPointer = "mouse"; document.addEventListener("pointerdown", e => { lastPointer = e.pointerType; if (!tip.hidden && !tip.contains(e.target) && !e.target.closest("[data-tip]")) hideTip(); }, true);
+  const touchTip = (el, ms) => { if (lastPointer === "mouse" || !el?.dataset.tip) return; showTip(el, true); if (ms) autoT = setTimeout(hideTip, ms); };
+
+  // ================= rendering =================
+  function renderTF() {
+    document.querySelectorAll(".tf button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tf === S.tf)));
+    const t = T(); $("tfdesc").textContent = `EMA 20 and RSI 14 on ${t.name.toLowerCase()} closes · trend counted in ${t.units}`;
+  }
+  function renderTiles() {
+    const m = cur(), el = $("tiles");
+    if (!m) { el.innerHTML = CCYS.map(c => `<div class="tile"><div class="top"><span class="c">${c}</span></div><span class="skel" style="height:20px;width:60%"></span><span class="skel"></span></div>`).join(""); return; }
+    const visible = new Set(); if (S.quick || S.ccy.length || S.pair || Object.keys(S.af).length) m.rows.filter(r => pass(r)).forEach(r => { visible.add(r.b); visible.add(r.q); });
+    const filtering = visible.size > 0 || (S.quick || S.ccy.length || S.pair);
+    el.innerHTML = m.ccy.map(c => `<button type="button" class="tile ${filtering && !visible.has(c.ccy) ? "dim" : ""}" data-tile="${c.ccy}" data-tip="tile:${c.ccy}" aria-pressed="${S.ccy.includes(c.ccy)}">
+      <span class="top"><span class="c">${c.ccy}</span><span class="rk">#${c.rank}</span></span>
+      <span class="sc" style="background:${scoreHeat(c.score)}">${c.score}<small>/7</small></span>
+      <span class="tr ${c.side === "S" ? "up" : "dn"}">${c.side === "S" ? "▲ strong" : "▼ weak"} ${c.run}${c.capped ? "+" : ""}${T().unit}</span>
+      <span class="mtf">${["D", "W", "M"].map(k => { const mm = MS[k]; const s = mm?.by[c.ccy]?.score; return `<span class="${k === S.tf ? "cur" : ""}" style="background:${s == null ? "#1d1d1d" : scoreHeat(s)}">${k}${s == null ? "" : s}</span>`; }).join("")}</span>
+    </button>`).join("");
+  }
+  function renderHist() {
+    const m = cur(), el = $("hist"), t = T();
+    $("histTitle").textContent = `Strength trend · last ${isPhone() ? Math.min(12, t.hist) : t.hist} ${t.units}`;
+    if (!m) { el.innerHTML = `<div class="msg">Loading ${t.name.toLowerCase()} bars…</div>`; return; }
+    const n = isPhone() ? Math.min(12, t.hist) : t.hist, keys = m.keys.slice(-n), snaps = m.snaps.slice(-n), order = m.ccy.map(c => c.ccy);
+    $("histLegend").innerHTML = ramp("0", "7");
+    el.style.gridTemplateColumns = `34px repeat(${keys.length}, minmax(0, 1fr))`;
+    const step = Math.ceil(keys.length / 5);
+    let h = `<span></span>` + keys.map((k, i) => `<span class="d">${i % step === 0 && i <= keys.length - step ? shortDate(k, S.tf) : ""}</span>`).join("");
+    for (const X of order) { h += `<span class="l">${X}</span>`; snaps.forEach((s, i) => { const v = s[X]; h += v.n ? `<span class="c" data-tip="hc:${X}@${keys[i]}" style="background:${scoreHeat(v.score)}">${v.score}</span>` : `<span class="c gy">—</span>`; }); }
+    el.innerHTML = h;
+  }
+
+  const PCOLS = [
+    { key: "idx", label: "#", type: "num", rn: true, get: r => r.idx + 1 },
+    { key: "p", label: "Pair", type: "cat", l: true, get: r => r.b + "/" + r.q, cell: r => `<td class="l id">${r.b}/${r.q}</td>` },
+    { key: "type", label: "Type", type: "cat", l: true, get: r => r.type, cell: r => `<td class="l ${r.type === "Major" ? "ye" : "gy"}">${r.type}</td>` },
+    { key: "b", label: "Base", type: "cat", l: true, get: r => r.b, cell: r => `<td class="l am">${r.b}</td>` },
+    { key: "q", label: "Quote", type: "cat", l: true, get: r => r.q, cell: r => `<td class="l am">${r.q}</td>` },
+    { key: "c", label: "Last", type: "num", get: r => r.c, cell: r => `<td>${px(r.p, r.c)}</td>` },
+    { key: "e", label: "EMA 20", type: "num", get: r => r.e, cell: r => `<td class="gy">${px(r.p, r.e)}</td>` },
+    { key: "d", label: "% EMA", type: "num", get: r => r.d, cell: r => `<td data-tip="cell:d:${r.p}" style="background:${heat(r.d / ({ D: 2, W: 4, M: 8 }[S.tf]))}">${pct(r.d)}</td>` },
+    { key: "signal", label: "Signal", type: "cat", l: true, get: r => r.signal, cell: r => `<td class="l ${r.signal === "Strong" ? "up" : "dn"}">${r.signal === "Strong" ? "▲" : "▼"} ${r.signal}</td>` },
+    { key: "rsi", label: "RSI 14", type: "num", get: r => r.rsi, cell: r => `<td data-tip="cell:rsi:${r.p}" class="${rsiCls(r.rsi)}">${r.rsi == null ? "—" : r.rsi.toFixed(1)}</td>` },
+    { key: "sb", label: "Base sc", type: "num", get: r => r.sb, cell: r => `<td style="color:${scoreColor(r.sb)}">${r.sb}</td>` },
+    { key: "sq", label: "Quote sc", type: "num", get: r => r.sq, cell: r => `<td style="color:${scoreColor(r.sq)}">${r.sq}</td>` },
+    { key: "gap", label: "Diff", type: "num", get: r => r.gap, cell: r => `<td data-tip="cell:gap:${r.p}" style="background:color-mix(in oklab, var(--key) ${Math.round(r.gap / 7 * 55)}%, transparent);color:${r.gap >= 5 ? "#000" : "var(--white)"};font-weight:600">${r.gap}</td>` },
+    { key: "side", label: "Side", type: "cat", l: true, get: r => r.side, cell: r => `<td class="l" data-tip="cell:side:${r.p}"><span class="pill ${r.side.toLowerCase()}">${r.side}</span>${r.aligned || !r.sgn ? "" : ' <span class="gy">✕px</span>'}</td>` },
+    { key: "cross", label: "X bars", type: "num", get: r => r.cross, cell: r => `<td data-tip="cell:cross:${r.p}" class="${r.cross <= 3 ? "ye" : ""}">${r.cross}</td>` },
+    { key: "slope", label: "EMA slope", type: "num", get: r => r.slope, cell: r => `<td data-tip="cell:slope:${r.p}" class="${r.slope > 0 ? "up" : r.slope < 0 ? "dn" : ""}">${pct(r.slope)}</td>` },
+    { key: "mom", label: "Δ Diff", type: "num", get: r => r.mom, cell: r => `<td data-tip="cell:mom:${r.p}" class="${r.mom > 0 ? "cy" : r.mom < 0 ? "mg" : "gy"}">${sgnN(r.mom)}</td>` },
+    { key: "evt", label: "Evt", type: "num", get: r => evFor(r.b, 0, 48).length + evFor(r.q, 0, 48).length, cell: r => { const n = evFor(r.b, 0, 48).length + evFor(r.q, 0, 48).length; return `<td class="l">${n ? `<button class="info" type="button" data-tip="pairev:${r.p}" aria-label="${n} high-impact events in 48 hours">${n}</button>` : '<span class="gy">—</span>'}</td>`; } }
+  ];
+  function pass(r, skip) {
+    if (r.missing) return false;
+    if (S.quick && QUICK[S.quick] && !QUICK[S.quick].fn(r)) return false;
+    if (S.ccy.length && !S.ccy.some(c => r.b === c || r.q === c)) return false;
+    if (S.pair && r.p !== S.pair) return false;
+    for (const [k, f] of Object.entries(S.af)) { if (k === skip) continue; const col = PCOLS.find(c => c.key === k); if (!col) continue; const v = col.get(r);
+      if (f.vals && !f.vals.includes(String(v))) return false; if (f.min != null && f.min !== "" && !(v >= +f.min)) return false; if (f.max != null && f.max !== "" && !(v <= +f.max)) return false; }
+    return true;
+  }
+  const sortRows = rows => { const col = PCOLS.find(c => c.key === S.sort.key) || PCOLS[0]; return rows.slice().sort((a, b) => { const x = col.get(a), y = col.get(b); if (x == null) return 1; if (y == null) return -1; return (typeof x === "string" ? x.localeCompare(y) : x - y) * S.sort.dir; }); };
+  function header() { return `<thead><tr>${PCOLS.map(c => { const on = S.sort.key === c.key; return `<th class="${c.l ? "l" : ""}" scope="col" ${on ? `aria-sort="${S.sort.dir > 0 ? "ascending" : "descending"}"` : ""}><span class="hc">${c.rn ? "#" : `<button class="sortb" type="button" data-sort="${c.key}" data-tip="def:${c.key}">${c.label}</button><span class="arr">${on ? (S.sort.dir > 0 ? "▲" : "▼") : ""}</span><button class="afb ${S.af[c.key] ? "on" : ""}" type="button" data-af="${c.key}" aria-label="Filter ${c.label}">▾</button>`}</span></th>`; }).join("")}</tr></thead>`; }
+  function renderPairs() {
+    const m = cur(), t = $("pairTable");
+    if (!m) { t.innerHTML = header() + `<tbody>${Array.from({ length: 10 }, (_, i) => `<tr><td class="rn">${i + 1}</td>${'<td><span class="skel"></span></td>'.repeat(PCOLS.length - 1)}</tr>`).join("")}</tbody>`; return 0; }
+    const rows = sortRows(m.rows.filter(r => pass(r)));
+    t.innerHTML = header() + `<tbody>${rows.length ? rows.map((r, i) => `<tr>${PCOLS.map(c => c.rn ? `<td class="rn">${i + 1}</td>` : c.cell(r)).join("")}</tr>`).join("") : `<tr class="empty"><td colspan="${PCOLS.length}">No pairs match the active filters. <button class="btn" type="button" data-clear>Clear all</button></td></tr>`}</tbody>`;
+    const loaded = m.rows.filter(r => !r.missing).length, avgD = rows.length ? rows.reduce((s, r) => s + r.d, 0) / rows.length : 0;
+    $("pairStatus").innerHTML = `<span><b>${rows.length}</b> of ${loaded} records</span><span>Long <b class="up">${rows.filter(r => r.side === "LONG").length}</b> · Short <b class="dn">${rows.filter(r => r.side === "SHORT").length}</b></span><span>Avg % EMA <b>${pct(avgD)}</b></span><span>${T().name} bars</span>`;
+    return rows.length;
+  }
+  let lastCount = null;
+  function renderStatus(n) {
+    const m = cur(); const sc = PCOLS.find(c => c.key === S.sort.key);
+    const chips = [];
+    if (S.quick && m) { const q = QUICK[S.quick]; chips.push(`<button class="fchip" type="button" data-f="q:${S.quick}">${typeof q.label === "function" ? q.label() : q.label} ✕</button>`); }
+    S.ccy.forEach(c => chips.push(`<button class="fchip" type="button" data-f="c:${c}">${c} ✕</button>`));
+    if (S.pair) chips.push(`<button class="fchip" type="button" data-f="p:${S.pair}">${S.pair.slice(0, 3)}/${S.pair.slice(3)} ✕</button>`);
+    Object.entries(S.af).forEach(([k, f]) => { const c = PCOLS.find(x => x.key === k); if (c) chips.push(`<button class="fchip" type="button" data-f="af:${k}">${esc(c.label)} ${f.vals ? "= " + esc(f.vals.join(",")) : `${f.min !== "" && f.min != null ? "≥" + esc(f.min) : ""}${f.max !== "" && f.max != null ? " ≤" + esc(f.max) : ""}`} ✕</button>`); });
+    const countTxt = m ? `${n} of ${m.rows.filter(r => !r.missing).length} pairs` : "Loading pairs…";
+    $("statusline").innerHTML = `<span class="count" id="countEl">${countTxt}</span><span>· ${T().name} · sorted by <b class="am">${esc(sc?.label || "")}</b> ${S.sort.dir > 0 ? "▲" : "▼"}</span>${chips.length ? `<span>·</span>${chips.join("")}` : `<span class="gy">· no filters</span>`}`;
+    if (m && lastCount !== null && lastCount !== countTxt) { const c = $("countEl"); c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 650); }
+    lastCount = m ? countTxt : null;
+    document.querySelectorAll(".key[data-q]").forEach(b => b.setAttribute("aria-pressed", String(S.quick === b.dataset.q)));
+    if (m) { $("kTop").textContent = m.ccy[0].ccy; $("kBot").textContent = m.ccy[7].ccy; }
+  }
+  function renderMatrix() {
+    const m = cur(), t = $("matrix"); if (!m) { t.innerHTML = `<tbody><tr><td class="diag" style="height:160px">Loading…</td></tr></tbody>`; return; }
+    const order = m.ccy.map(c => c.ccy), ds = []; for (const X of CCYS) for (const Y of CCYS) if (X !== Y) { const d = dist(S.tf, X, Y, null); if (d != null) ds.push(Math.abs(d)); }
+    const dom = Math.max(0.5, Math.ceil(Math.max(...ds, 0.5) * 2) / 2); $("mxLegend").innerHTML = ramp(pct(-dom), pct(dom));
+    t.innerHTML = `<thead><tr><th></th>${CCYS.map(c => `<th scope="col">${c}</th>`).join("")}<th scope="col" class="def" data-tip="def:sb">SC</th></tr></thead><tbody>${order.map(X => `<tr><th class="rh" scope="row" data-ccy="${X}">${X}</th>${CCYS.map(Y => { if (X === Y) return `<td class="diag">·</td>`; const d = dist(S.tf, X, Y, null), p = pairOf(X, Y).p; return d == null ? `<td class="diag">—</td>` : `<td data-pair="${p}" data-tip="mx:${X}-${Y}" class="${S.pair === p ? "on" : ""}" style="background:${heat(d / dom)}">${(d > 0 ? "+" : "") + d.toFixed(dom > 5 ? 1 : 2)}</td>`; }).join("")}<td style="background:#0d0d0d;color:${scoreColor(m.today[X].score)};font-weight:600;cursor:default">${m.today[X].score}</td></tr>`).join("")}</tbody>`;
+  }
+  const MAJOR_RX = /\b(fed|fomc|powell|ecb|lagarde|boe|bank of england|bailey|boj|bank of japan|ueda|rba|rbnz|boc|bank of canada|snb|central bank|rate (cut|hike|decision)|rates?|inflation|cpi|payrolls?|jobs|unemployment|gdp|tariffs?|intervention|dollar|euro|sterling|yen|franc|aussie|kiwi|loonie|treasur(y|ies) yields?)\b/i;
+  const NOISE_RX = /\b(inventor(y|ies)|barrels?|buys back|auction results?)\b/i;
+  const KW = [[/dollar|\bfed\b|fomc|powell|treasur|u\.s\.|\bus\b/i, "USD"], [/\beuro\b|\becb\b|lagarde|euro zone|eurozone/i, "EUR"], [/sterling|pound|\bboe\b|bank of england|bailey|\buk\b/i, "GBP"], [/\byen\b|\bboj\b|bank of japan|ueda|japan/i, "JPY"], [/aussie|\brba\b|australia/i, "AUD"], [/kiwi|rbnz|new zealand/i, "NZD"], [/loonie|\bboc\b|bank of canada|canad/i, "CAD"], [/\bfranc\b|\bsnb\b|swiss/i, "CHF"]];
+  function renderEvents() {
+    const el = $("events");
+    if (eventsErr) { el.innerHTML = `<div class="msg">Couldn't load the economic calendar (${esc(eventsErr)}). Use REFRESH to try again.</div>`; return; }
+    if (!events) return;
+    let list = events.slice().sort((a, b) => a.ts - b.ts); if (S.ccy.length) list = list.filter(e => S.ccy.includes(e.ccy));
+    if (!list.length) { el.innerHTML = `<div class="msg">No high-impact events${S.ccy.length ? " for " + S.ccy.join(", ") : ""} in this window.</div>`; return; }
+    const now = Date.now();
+    el.innerHTML = `<table class="xl ev"><thead><tr><th class="l"><span class="hc">When</span></th><th class="l"><span class="hc">Ccy</span></th><th class="l"><span class="hc">Event</span></th><th><span class="hc">Act</span></th><th><span class="hc">Fcst</span></th><th><span class="hc">Prev</span></th><th><span class="hc"></span></th></tr></thead><tbody>${list.map(e => { const sp = surprise(e), cls = sp === "above" ? "cy" : sp === "below" ? "mg" : "";
+      return `<tr class="${e.ts > now ? "future" : ""}"><td class="when">${fmtDay(e.ts)} ${fmtTime(e.ts)}</td><td class="ccy am">${e.ccy}</td><td class="evn">${esc(e.title)}${e.period ? ` <span class="gy">${esc(e.period)}</span>` : ""}</td><td class="${cls}">${fmtNum(e.actual, e)}</td><td class="gy">${fmtNum(e.forecast, e)}</td><td class="gy">${fmtNum(e.previous, e)}</td><td><button class="info" type="button" data-tip="ev:${esc(e.id)}" aria-label="Note and source for ${esc(e.title)}">i</button></td></tr>`; }).join("")}</tbody></table>`;
+  }
+  function renderHeadlines() {
+    const el = $("headlines");
+    if (newsErr) { el.innerHTML = `<div class="msg">Couldn't load headlines (${esc(newsErr)}). Use REFRESH to try again.</div>`; return; }
+    if (!headlines) return;
+    let list = headlines; if (S.ccy.length) list = list.filter(h => h.ccys.some(c => S.ccy.includes(c))); list = list.slice(0, 10);
+    if (!list.length) { el.innerHTML = `<div class="msg">No major headlines${S.ccy.length ? " for " + S.ccy.join(", ") : ""} right now.</div>`; return; }
+    el.innerHTML = `<ul class="hl">${list.map(h => `<li><span class="t">${fmtTime(h.ts)}</span><span><span class="p">${esc(h.provider)}${h.ccys.length ? ` · <span class="ye">${h.ccys.join(" ")}</span>` : ""}</span><span class="h">${esc(h.title)}</span></span><button class="info" type="button" data-tip="hl:${esc(h.id)}" aria-label="Source for this headline">i</button></li>`).join("")}</ul>`;
+  }
+  function renderTop() {
+    const m = cur(), t = $("topTable"); if (!m) { t.innerHTML = `<tbody>${"<tr><td><span class=\"skel\"></span></td></tr>".repeat(4)}</tbody>`; return; }
+    const rows = m.rows.filter(r => !r.missing && r.aligned).sort((a, b) => b.gap - a.gap || Math.abs(b.d) - Math.abs(a.d)).slice(0, 4);
+    t.innerHTML = `<tbody>${rows.length ? rows.map(r => `<tr style="cursor:pointer" data-toppair="${r.p}"><td class="l id">${r.b}/${r.q}</td><td class="l" data-tip="cell:side:${r.p}"><span class="pill ${r.side.toLowerCase()}">${r.side}</span></td><td data-tip="cell:gap:${r.p}">Diff <b>${r.gap}</b></td><td data-tip="cell:d:${r.p}" class="${r.d > 0 ? "up" : "dn"}">${pct(r.d)}</td><td data-tip="cell:rsi:${r.p}" class="${rsiCls(r.rsi)}">RSI ${r.rsi?.toFixed(1) ?? "—"}</td><td class="ye" data-tip="cell:cross:${r.p}">${r.cross}${T().unit}</td></tr>`).join("") : `<tr class="empty"><td>No confirmed setups on this timeframe.</td></tr>`}</tbody>`;
+  }
+  function renderAll() { renderTF(); renderTiles(); renderTop(); renderHist(); const n = renderPairs(); renderStatus(n); renderMatrix(); renderEvents(); renderHeadlines(); if (tipFor && !document.body.contains(tipFor)) hideTip(); }
+  let raf = 0; const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { for (const k of ["D", "W", "M"]) MS[k] = build(k); renderAll(); }); };
+
+  // after a filter change on a phone, bring the results into view under the sticky bar
+  function revealResults() { if (!isPhone()) return; const ctlH = $("ctl").getBoundingClientRect().bottom; const top = $("pairPanel").getBoundingClientRect().top; if (top > innerHeight - 160 || top < ctlH) window.scrollBy({ top: top - ctlH - 6, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
+
+  // ================= autofilter =================
+  const af = $("af"); let afKey = null;
+  function openAF(btn) {
+    const m = cur(); if (!m) return; afKey = btn.dataset.af; const col = PCOLS.find(c => c.key === afKey); const curF = S.af[afKey] || {};
+    let inner = `<button class="sortopt" type="button" data-afs="1">▲ Sort ${col.type === "cat" ? "A → Z" : "smallest → largest"}</button><button class="sortopt" type="button" data-afs="-1">▼ Sort ${col.type === "cat" ? "Z → A" : "largest → smallest"}</button><hr>`;
+    if (col.type === "cat") { const vals = [...new Set(m.rows.filter(r => pass(r, afKey)).map(r => String(col.get(r))))].sort(); const sel = curF.vals || vals;
+      inner += `<label><input type="checkbox" id="afAll" ${sel.length >= vals.length ? "checked" : ""}> (Select all)</label><div class="list">${vals.map(v => `<label><input type="checkbox" class="afv" value="${esc(v)}" ${sel.includes(v) ? "checked" : ""}> ${esc(v)}</label>`).join("")}</div>`; }
+    else inner += `<div class="row">≥ <input type="number" id="afMin" step="any" value="${esc(curF.min ?? "")}" aria-label="Minimum"></div><div class="row">≤ <input type="number" id="afMax" step="any" value="${esc(curF.max ?? "")}" aria-label="Maximum"></div>`;
+    inner += `<div class="foot"><button class="btn" type="button" id="afClear">Clear</button><button class="btn" type="button" id="afOk" style="border-color:var(--key)">OK</button></div>`;
+    af.innerHTML = inner; af.hidden = false; hideTip();
+    const r = btn.getBoundingClientRect(); af.style.left = Math.max(8, Math.min(innerWidth - 228, r.left - 100)) + "px"; af.style.top = Math.max(8, Math.min(innerHeight - af.offsetHeight - 8, r.bottom + 4)) + "px";
+    af.querySelectorAll("[data-afs]").forEach(b => b.onclick = () => { S.sort = { key: afKey, dir: +b.dataset.afs }; closeAF(); save(); renderAll(); });
+    const all = $("afAll"); if (all) all.onchange = () => af.querySelectorAll(".afv").forEach(x => x.checked = all.checked);
+    $("afClear").onclick = () => { delete S.af[afKey]; closeAF(); save(); renderAll(); };
+    $("afOk").onclick = () => { if (col.type === "cat") { const boxes = [...af.querySelectorAll(".afv")], v = boxes.filter(x => x.checked).map(x => x.value); if (v.length === boxes.length) delete S.af[afKey]; else S.af[afKey] = { vals: v }; }
+      else { const mn = $("afMin").value, mx = $("afMax").value; if (mn === "" && mx === "") delete S.af[afKey]; else S.af[afKey] = { min: mn, max: mx }; } closeAF(); save(); renderAll(); revealResults(); };
+  }
+  function closeAF() { af.hidden = true; afKey = null; }
+  document.addEventListener("mousedown", e => { if (!af.hidden && !af.contains(e.target) && !e.target.closest(".afb")) closeAF(); });
+
+  // ================= clicks =================
+  document.addEventListener("click", e => {
+    const tfb = e.target.closest(".tf button"); if (tfb) { S.tf = tfb.dataset.tf; save(); renderAll(); return; }
+    const fc = e.target.closest("[data-filter-ccy]"); if (fc) { toggleCcy(fc.dataset.filterCcy); hideTip(); revealResults(); return; }
+    const sb = e.target.closest(".sortb"); if (sb) { const k = sb.dataset.sort; S.sort = { key: k, dir: S.sort.key === k ? -S.sort.dir : (["p", "b", "q", "type", "signal", "side"].includes(k) ? 1 : -1) }; save(); renderAll(); const nb = document.querySelector(`.sortb[data-sort="${k}"]`); touchTip(nb, 3500); return; }
+    const afb = e.target.closest(".afb"); if (afb) { if (afKey === afb.dataset.af) closeAF(); else openAF(afb); return; }
+    const tile = e.target.closest(".tile"); if (tile) { if (lastPointer !== "mouse" && S.tips !== false) { showTip(tile, true); return; } toggleCcy(tile.dataset.tile); return; }
+    const k = e.target.closest(".key[data-q]"); if (k) { if (!cur()) return; S.quick = S.quick === k.dataset.q ? null : k.dataset.q; save(); renderAll(); revealResults(); return; }
+    const rh = e.target.closest("th[data-ccy]"); if (rh) { toggleCcy(rh.dataset.ccy); return; }
+    const tp = e.target.closest("tr[data-toppair]"); if (tp && (lastPointer === "mouse" || S.tips === false || !e.target.closest("[data-tip]"))) { S.pair = S.pair === tp.dataset.toppair ? null : tp.dataset.toppair; save(); renderAll(); revealResults(); return; }
+    const cell = e.target.closest("td[data-pair]"); if (cell) { S.pair = S.pair === cell.dataset.pair ? null : cell.dataset.pair; save(); renderAll(); revealResults(); return; }
+    const chip = e.target.closest(".fchip"); if (chip) { const [t, v] = chip.dataset.f.split(":"); if (t === "q") S.quick = null; if (t === "c") S.ccy = S.ccy.filter(x => x !== v); if (t === "p") S.pair = null; if (t === "af") delete S.af[v]; save(); renderAll(); return; }
+    if (e.target.closest("[data-clear]") || e.target.closest("#clearAll")) { clearAll(); return; }
+    const t = e.target.closest("[data-tip]"); if (t && lastPointer !== "mouse") { if (tipFor === t && tipPinned) hideTip(); else showTip(t, true); return; }
+    if (t && t.classList.contains("info")) { if (tipFor === t && tipPinned) hideTip(); else showTip(t, true); }
+  });
+  function toggleCcy(c) { S.ccy = S.ccy.includes(c) ? S.ccy.filter(x => x !== c) : [...S.ccy, c]; save(); renderAll(); }
+  function clearAll() { S.quick = null; S.ccy = []; S.pair = null; S.af = {}; save(); renderAll(); }
+  addEventListener("resize", () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(renderAll); });
+  function applyTips() { const on = S.tips !== false; $("tipsToggle").checked = on; document.body.classList.toggle("notips", !on); $("pairHint").textContent = on ? "Hover a header for its formula · click to sort · ▾ to filter" : "Click a header to sort · ▾ to filter"; if (!on) hideTip(); }
+  $("tipsToggle").addEventListener("change", e => { S.tips = e.target.checked; save(); applyTips(); });
+  applyTips();
+
+  // ================= status / data =================
+  function setFresh() {
+    const n = k => PAIRS.filter(p => series[k][p]).length, d = n("D"), w = n("W"), mo = n("M");
+    const latest = Math.max(0, ...PAIRS.map(p => series.D[p]?.storedAt || 0));
+    const snapD = PAIRS.some(p => series.D[p]?.snap);
+    $("fresh").innerHTML = d === 28 && w === 28 && mo === 28 ? (snapD ? `Prices <span class="am">SNAPSHOT</span> · ${fmtDay(latest)} ${fmtTime(latest)}` : `Prices <span class="up">LIVE</span> · upd ${fmtTime(latest)}`) : `Loading D ${d}/28 · W ${w}/28 · M ${mo}/28`;
+  }
+  const tick = () => { $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) + " LOCAL"; }; tick(); setInterval(tick, 15000);
+  function notice(text, action) { const n = $("notice"); n.hidden = false; n.innerHTML = `<span>${text}</span>`; if (action) { const b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.textContent = action.label; b.onclick = action.run; n.append(b); } }
+  const PAGE_LEVEL = {
+    server_not_connected: "Add the TradingView connector in claude.ai Settings → Connectors, then reload.",
+    needs_reauth: "Your TradingView connection has expired. Reconnect it in claude.ai Settings → Connectors.",
+    not_in_manifest: "TradingView is turned off for this page. Turn it on from the page's Permissions menu.",
+    blocked_by_policy: "Your organization's policy blocks TradingView data on this page.",
+    selection_required: "You have more than one TradingView connector. Choose one in the claude.ai prompt, then reload.",
+    not_granted: "Live data loads only inside claude.ai. Open this page there to connect TradingView.",
+    capability_disabled: "Live data loads only inside claude.ai. Open this page there to connect TradingView."
+  };
+  let mcp = null; const unsubs = [];
+  const ohlcvIn = (tf, p) => ({ symbol: "OANDA:" + p, interval: TF[tf].iv, count: TF[tf].bars, format: "columns" });
+  const ymd = d => d.toISOString().slice(0, 10);
+  const calIn = () => { const n = Date.now(); return { countries: "US,EU,GB,JP,AU,CA,CH,NZ", currencies: CCYS.join(","), min_importance: 1, date_from: ymd(new Date(n - 7 * 864e5)), date_to: ymd(new Date(n + 7 * 864e5)) }; };
+  const NEWS_SYMS = ["OANDA:EURUSD", "OANDA:USDJPY", "OANDA:GBPUSD"], newsBuf = {};
+  function acceptBars(tf, p, res) { const b = res?.payload?.bars; if (!b || !Array.isArray(b.c)) { errors[tf][p] = "no bars"; return; } delete errors[tf][p]; series[tf][p] = { t: b.t, c: b.c, storedAt: res.cache?.storedAt || Date.now() }; setFresh(); schedule(); queueSave(tf); }
+  function acceptCal(res) { const list = res?.payload?.result; if (!Array.isArray(list)) { eventsErr = "unexpected reply"; renderEvents(); return; } eventsErr = null; liveEv = true; events = list.filter(e => e.importance >= 1).map(e => ({ ...e, ccy: e.currency || CTRY[e.country], ts: Date.parse(e.date) })).filter(e => CCYS.includes(e.ccy)); schedule(); queueSave("ev"); }
+  function acceptNews(sym, res) { const list = res?.payload?.data?.headlines; if (!Array.isArray(list)) { newsErr = "unexpected reply"; renderHeadlines(); return; } newsErr = null; liveNews = true; newsBuf[sym] = list; const seen = new Set(), out = [];
+    for (const h of Object.values(newsBuf).flat()) { if (seen.has(h.id)) continue; seen.add(h.id); const title = h.title || ""; if (!(h.urgency === 1 || MAJOR_RX.test(title)) || NOISE_RX.test(title)) continue;
+      out.push({ id: h.id, title, ts: (h.published || 0) * 1000, provider: h.provider?.name || "—", link: h.link || ("https://www.tradingview.com" + (h.storyPath || "")), paywall: !!h.paywall, ccys: KW.filter(([rx]) => rx.test(title)).map(([, c]) => c) }); }
+    headlines = out.sort((a, b) => b.ts - a.ts); renderHeadlines(); queueSave("news"); }
+  function onErr(where, err) {
+    const code = err?.code || "upstream_error";
+    if (where.startsWith("px:")) { const [, tf, p] = where.split(":"); if (["needs_reauth","server_not_connected","not_in_manifest","blocked_by_policy","approval_required","selection_required"].includes(code) && !series[tf][p]?.snap) delete series[tf][p]; errors[tf][p] = code; setFresh(); schedule(); }
+    if (where === "cal" && !snapEvents) { eventsErr = code; renderEvents(); }
+    if (where.startsWith("news") && !snapNews) { newsErr = code; renderHeadlines(); }
+    if (code === "approval_required") notice("TradingView data needs your approval for this page.", { label: "Allow TradingView data", run: () => { $("notice").hidden = true; loadSlow(true); } });
+    else if (PAGE_LEVEL[code]) { if (hasSnap()) showSnapNotice(); else notice(PAGE_LEVEL[code]); }
+  }
+  const W = (tool, input, ok, where, every) => mcp.watchTool(SERVER, tool, input, ev => ev.type === "data" ? ok(ev.result) : onErr(where, ev.error), { cache: { staleTime: 10 * 60e3, gcTime: 24 * 3600e3 }, refetchInterval: every });
+  function watchFast() { // daily bars + calendar + news stay live (32 watches, under the 64 limit)
+    unsubs.splice(0).forEach(u => u());
+    for (const p of PAIRS) unsubs.push(W(OHLCV, ohlcvIn("D", p), r => acceptBars("D", p, r), "px:D:" + p, TF.D.every));
+    unsubs.push(W(CAL, calIn(), acceptCal, "cal", 30 * 60e3));
+    for (const s of NEWS_SYMS) unsubs.push(W(NEWS, { symbol: s, limit: 50 }, r => acceptNews(s, r), "news:" + s, 10 * 60e3));
+  }
+  async function loadSlow(force) { // weekly + monthly: cached reads, 4 at a time
+    const jobs = []; for (const tf of ["W", "M"]) for (const p of PAIRS) jobs.push([tf, p]);
+    const opt = { cache: { staleTime: force ? 0 : 50 * 60e3, gcTime: 7 * 24 * 3600e3, ...(force ? { refresh: true } : {}) } };
+    let stop = false; const worker = async () => { while (jobs.length && !stop) { const [tf, p] = jobs.shift(); try { acceptBars(tf, p, await mcp.callTool(SERVER, OHLCV, ohlcvIn(tf, p), opt)); } catch (e) { onErr(`px:${tf}:${p}`, e); if (PAGE_LEVEL[e?.code] || e?.code === "approval_required") stop = true; } } };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+  }
+  async function refreshAll() { if (!mcp) return; $("fresh").textContent = "Refreshing…"; try { await mcp.invalidate(SERVER); } catch (e) {}
+    const opt = { cache: { staleTime: 0, gcTime: 24 * 3600e3, refresh: true } };
+    for (const p of PAIRS) { try { acceptBars("D", p, await mcp.callTool(SERVER, OHLCV, ohlcvIn("D", p), opt)); } catch (e) { onErr("px:D:" + p, e); if (PAGE_LEVEL[e?.code]) return; } }
+    try { acceptCal(await mcp.callTool(SERVER, CAL, calIn(), opt)); } catch (e) { onErr("cal", e); }
+    for (const s of NEWS_SYMS) { try { acceptNews(s, await mcp.callTool(SERVER, NEWS, { symbol: s, limit: 50 }, opt)); } catch (e) { onErr("news:" + s, e); } }
+    loadSlow(true); }
+  $("refreshBtn").onclick = refreshAll;
+
+  // ================= shared snapshot =================
+  // The owner's view saves the latest bars, events and headlines to the artifact's db;
+  // viewers without their own TradingView connector render from it. Live data always wins.
+  const SNAP_BARS = { D: 160, W: 130, M: 110 };
+  let db = null, isOwner = false, snapEvents = null, snapNews = null; const snapAt = { D: 0, W: 0, M: 0 };
+  const liveTf = tf => PAIRS.every(p => series[tf][p] && !series[tf][p].snap);
+  const hasSnap = () => ["D", "W", "M"].some(k => PAIRS.some(p => series[k][p]?.snap));
+  function showSnapNotice() { if (isOwner || !hasSnap()) return; const at = Math.max(snapAt.D, snapAt.W, snapAt.M);
+    notice(`Showing the owner's saved snapshot from ${fmtDay(at)} ${fmtTime(at)}. It updates whenever the owner opens this page. For live prices, add the TradingView connector in claude.ai Settings → Connectors.`); }
+  function applySnap(key, d) {
+    if (!d) return;
+    if (key === "ev") { if (!Array.isArray(d.list)) return; snapEvents = d.list; if (!liveEv) { events = d.list; eventsErr = null; schedule(); } return; }
+    if (key === "news") { if (!Array.isArray(d.list)) return; snapNews = d.list; if (!liveNews) { headlines = d.list; newsErr = null; renderHeadlines(); } return; }
+    snapAt[key] = d.at || 0; const ps = d.pairs || {};
+    for (const p of PAIRS) { const x = ps[p]; if (!x || !Array.isArray(x.t) || !Array.isArray(x.c)) continue; const s = series[key][p]; if (s && !s.snap) continue; series[key][p] = { t: x.t, c: x.c, storedAt: d.at, snap: true }; }
+    setFresh(); schedule(); showSnapNotice();
+  }
+  const lastSig = {}, saveT = {}; let saving = Promise.resolve();
+  function queueSave(key) { if (!db || !isOwner) return; clearTimeout(saveT[key]); saveT[key] = setTimeout(() => saveSnap(key), 4000); }
+  function saveSnap(key) {
+    let body;
+    if (key === "ev") { if (!liveEv || !events) return; body = { at: Date.now(), list: events.map(e => ({ id: e.id, title: e.title ?? "", period: e.period ?? null, country: e.country ?? null, ccy: e.ccy, ts: e.ts, actual: e.actual ?? null, forecast: e.forecast ?? null, previous: e.previous ?? null, unit: e.unit ?? null, scale: e.scale ?? null, source: e.source ?? null, source_url: e.source_url ?? null, comment: String(e.comment || "").slice(0, 300) })) }; }
+    else if (key === "news") { if (!liveNews || !headlines) return; body = { at: Date.now(), list: headlines.slice(0, 40) }; }
+    else { if (!liveTf(key)) return; const pairs = {}; let at = 0, n = SNAP_BARS[key];
+      for (const p of PAIRS) { const s = series[key][p]; pairs[p] = { t: s.t.slice(-n), c: s.c.slice(-n).map(v => +(+v).toPrecision(6)) }; at = Math.max(at, s.storedAt || 0); }
+      body = { at: at || Date.now(), pairs }; }
+    const sig = JSON.stringify(body.list || body.pairs); if (lastSig[key] === sig) return;
+    saving = saving.then(() => db.doc("snap/" + key).set(body)).then(() => { lastSig[key] = sig; }).catch(() => {});
+  }
+  (async () => {
+    try { const [d, u] = await Promise.all([window.claude?.use?.("db"), window.claude?.use?.("user")]); db = d || null; isOwner = !!(await u?.isOwner?.()); } catch (e) {}
+    if (!db) return;
+    for (const k of ["D", "W", "M", "ev", "news"]) db.doc("snap/" + k).onSnapshot(s => { if (s.exists) applySnap(k, s.data()); }, () => {});
+    if (isOwner) ["D", "W", "M", "ev", "news"].forEach(queueSave);
+  })();
+
+  renderAll(); setFresh();
+  if (!window.claude?.use) { notice(PAGE_LEVEL.not_granted); return; }
+  window.claude.use("mcp").then(ns => { mcp = ns; if (!mcp) { if (hasSnap()) showSnapNotice(); else notice(PAGE_LEVEL.not_granted); return; } watchFast(); loadSlow(false); setInterval(() => { if (!document.hidden) loadSlow(false); }, TF.W.every); });
+})();
+</script>
