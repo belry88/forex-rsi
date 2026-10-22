@@ -632,14 +632,16 @@ table.xl { border-collapse: collapse; width: 100%; font-variant-numeric: tabular
   }
   const tick = () => { $("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) + " LOCAL"; }; tick(); setInterval(tick, 15000);
   function notice(text, action) { const n = $("notice"); n.hidden = false; n.innerHTML = `<span>${text}</span>`; if (action) { const b = document.createElement("button"); b.className = "btn"; b.type = "button"; b.textContent = action.label; b.onclick = action.run; n.append(b); } }
+  const LIVE_URL = "https://claude.ai/artifact/GUt6EJFjd3FK1A1whLsbnZ";
+  const LIVE_MSG = `This copy has no market data. Prices, events and headlines load only inside claude.ai. <a href="${LIVE_URL}" target="_blank" rel="noopener" style="color:var(--cyan)">Open the live Forex RSI app →</a>`;
   const PAGE_LEVEL = {
     server_not_connected: "Add the TradingView connector in claude.ai Settings → Connectors, then reload.",
     needs_reauth: "Your TradingView connection has expired. Reconnect it in claude.ai Settings → Connectors.",
     not_in_manifest: "TradingView is turned off for this page. Turn it on from the page's Permissions menu.",
     blocked_by_policy: "Your organization's policy blocks TradingView data on this page.",
     selection_required: "You have more than one TradingView connector. Choose one in the claude.ai prompt, then reload.",
-    not_granted: "Live data loads only inside claude.ai. Open this page there to connect TradingView.",
-    capability_disabled: "Live data loads only inside claude.ai. Open this page there to connect TradingView."
+    not_granted: LIVE_MSG,
+    capability_disabled: LIVE_MSG
   };
   let mcp = null; const unsubs = [];
   const ohlcvIn = (tf, p) => ({ symbol: "OANDA:" + p, interval: TF[tf].iv, count: TF[tf].bars, format: "columns" });
