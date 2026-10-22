@@ -2,6 +2,10 @@
 
 All edits to Forex RSI. Newest first. Versions 1–9 were built before this repository existed and are reconstructed from the project notes; from version 10 on, every entry matches a commit and pull request.
 
+## v10 · 2026-10-22 · GitHub repository and Pages copy
+- Project moved into the `belry88/forex-rsi` repository; `main` is served by GitHub Pages, changes arrive through the `claude-code` branch.
+- Outside claude.ai (e.g. the GitHub Pages copy) the notice now says there is no market data and links to the live app.
+
 ## v9 · 2026-10-22 · Tooltips switch
 - Added a **TOOLTIPS** checkbox in the control bar. Off hides hover/tap explanations, dotted underlines and the help cursor; on a phone, tapping a tile then filters straight away.
 - Choice is saved per viewer in their browser.
