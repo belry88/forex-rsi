@@ -33,4 +33,14 @@ From the `ForexRSI_5` workbook ("RSI (2)" tab):
 
 Each change is committed on `claude-code`, logged in [CHANGELOG.md](CHANGELOG.md), opened as a pull request into `main` and merged. Changes made to the live app from a Claude chat are pulled back into the repo the same way, so the history stays complete.
 
+## Remote Control
+
+Start a Claude Code session for this repo that you can drive from the Claude mobile app or claude.ai/code:
+
+```
+fxrc
+```
+
+(`fxrc` is a shell shortcut for `cd ~/Claude/Trading/forex-rsi && claude remote-control --name "Forex RSI" --permission-mode acceptEdits`.) The session follows the steps in [CLAUDE.md](CLAUDE.md).
+
 Not investment advice.
